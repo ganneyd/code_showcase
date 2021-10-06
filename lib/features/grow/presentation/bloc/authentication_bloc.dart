@@ -1,0 +1,61 @@
+import 'dart:async';
+import 'package:bloc/bloc.dart';
+import 'package:dartz/dartz.dart';
+import 'package:equatable/equatable.dart';
+import 'package:grow_run_v1/core/error/failures.dart';
+import 'package:grow_run_v1/features/grow/domain/entities/entities_bucket.dart';
+import 'package:grow_run_v1/features/grow/domain/repositories/authentication_repository.dart';
+import 'package:logging/logging.dart';
+import 'package:pedantic/pedantic.dart';
+part 'authentication_state.dart';
+part 'authentication_event.dart';
+
+///
+class AuthenticationBloc
+    extends Bloc<AuthenticationEvent, AuthenticationState> {
+  // ignore: public_member_api_docs
+  AuthenticationBloc({
+    required AuthenticationRepository authenticationRepository,
+  })  : _authenticationRepository = authenticationRepository,
+        super(const AuthenticationState.uninitialized()) {
+    _userSubscription = _authenticationRepository.user
+        .listen((UserEntity user) => add(AuthenticationUserChanged(user)));
+  }
+  final Logger _authBlocLogger = Logger('Auth-Bloc-Logger');
+  final AuthenticationRepository _authenticationRepository;
+  late StreamSubscription<UserEntity> _userSubscription;
+
+  @override
+  Stream<AuthenticationState> mapEventToState(
+      AuthenticationEvent event) async* {
+    if (event is AuthenticationUserChanged) {
+      _authBlocLogger.info('User changed');
+      final Either<Failure, UserEntity> results =
+          await _authenticationRepository.getCredentials();
+      yield results.fold((Failure l) {
+        return _mapAuthenticationUserChangedToState(event);
+      }, (UserEntity user) {
+        _authBlocLogger.info('The user returned from repo in bloc \n $user');
+        return _mapAuthenticationUserChangedToState(
+            AuthenticationUserChanged(user));
+      });
+    } else if (event is AuthenticationLogoutRequested) {
+      unawaited(_authenticationRepository.signOutUser());
+    }
+  }
+
+  AuthenticationState _mapAuthenticationUserChangedToState(
+      AuthenticationUserChanged event) {
+    _authBlocLogger.info('Map  auth user called with new event', event);
+
+    return event.user != UserEntity.empty
+        ? AuthenticationState.authenticated(event.user)
+        : const AuthenticationState.unauthenticated();
+  }
+
+  @override
+  Future<void> close() {
+    _userSubscription.cancel();
+    return super.close();
+  }
+}
